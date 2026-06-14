@@ -36,3 +36,15 @@ token = "env:TE_TOKEN"
 # addr  = "192.168.1.50"
 # port  = 47100
 # token = "env:TE_TOKEN"
+
+# Notifiers alert you when an agent enters a blocking state
+# (waiting_permission or idle). If no [[notifier]] is configured, the default
+# is "say" on macOS (falls back to terminal bell on other systems).
+
+# macOS: speak the alert via the `say` command.
+# [[notifier]]
+# type = "say"
+
+# Any terminal: ring the terminal bell (\a).
+# [[notifier]]
+# type = "bell"

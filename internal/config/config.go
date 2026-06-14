@@ -42,7 +42,21 @@ type Host struct {
 
 // Hosts is the parsed hosts.toml.
 type Hosts struct {
-	Hosts []Host
+	Hosts     []Host
+	Notifiers []NotifierConfig
+}
+
+// NotifierType is the kind of built-in notifier.
+type NotifierType string
+
+const (
+	NotifierSay  NotifierType = "say"
+	NotifierBell NotifierType = "bell"
+)
+
+// NotifierConfig is one [[notifier]] table entry.
+type NotifierConfig struct {
+	Type NotifierType
 }
 
 // DefaultHostsPath returns ~/.config/tiger-eye/hosts.toml.
@@ -65,10 +79,15 @@ func LoadHosts(path string) (*Hosts, error) {
 
 	var hs Hosts
 	var cur *Host
+	var curN *NotifierConfig
 	flush := func() {
 		if cur != nil {
 			hs.Hosts = append(hs.Hosts, *cur)
 			cur = nil
+		}
+		if curN != nil {
+			hs.Notifiers = append(hs.Notifiers, *curN)
+			curN = nil
 		}
 	}
 
@@ -85,12 +104,26 @@ func LoadHosts(path string) (*Hosts, error) {
 			cur = &Host{Port: DefaultPort}
 			continue
 		}
-		if cur == nil {
-			return nil, fmt.Errorf("line %d: key outside [[host]] table: %q", line, raw)
+		if raw == "[[notifier]]" {
+			flush()
+			curN = &NotifierConfig{}
+			continue
+		}
+		if cur == nil && curN == nil {
+			return nil, fmt.Errorf("line %d: key outside [[host]] or [[notifier]] table: %q", line, raw)
 		}
 		key, val, ok := splitKV(raw)
 		if !ok {
 			return nil, fmt.Errorf("line %d: malformed line: %q", line, raw)
+		}
+		if curN != nil {
+			switch key {
+			case "type":
+				curN.Type = NotifierType(val)
+			default:
+				return nil, fmt.Errorf("line %d: unknown notifier key %q", line, key)
+			}
+			continue
 		}
 		switch key {
 		case "name":
@@ -123,6 +156,11 @@ func LoadHosts(path string) (*Hosts, error) {
 			return nil, err
 		}
 	}
+	for i := range hs.Notifiers {
+		if err := validateNotifier(&hs.Notifiers[i]); err != nil {
+			return nil, err
+		}
+	}
 	return &hs, nil
 }
 
@@ -144,6 +182,15 @@ func validate(h *Host) error {
 		return fmt.Errorf("host %q: unknown mode %q", h.Name, h.Mode)
 	}
 	return nil
+}
+
+func validateNotifier(n *NotifierConfig) error {
+	switch n.Type {
+	case NotifierSay, NotifierBell:
+		return nil
+	default:
+		return fmt.Errorf("notifier with unknown type %q", n.Type)
+	}
 }
 
 // splitKV parses `key = value`, stripping surrounding quotes and trailing

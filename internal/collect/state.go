@@ -33,9 +33,10 @@ type HostStatus struct {
 // single source of truth the collector writes and the dashboard reads, so it is
 // safe for concurrent use.
 type Store struct {
-	mu     sync.Mutex
-	agents map[string]*AgentState // key: machine\x00session_id
-	hosts  map[string]*HostStatus // key: host name
+	mu        sync.Mutex
+	agents    map[string]*AgentState // key: machine\x00session_id
+	hosts     map[string]*HostStatus // key: host name
+	notifiers []Notifier
 
 	// notify is closed and replaced on every state change so any number of
 	// readers (the dashboard) can wake on a fresh channel without per-waiter
@@ -49,6 +50,14 @@ func NewStore() *Store {
 		hosts:  make(map[string]*HostStatus),
 		notify: make(chan struct{}),
 	}
+}
+
+// AddNotifier registers a notifier to receive state transition callbacks.
+// Must be called before the pull loops start.
+func (s *Store) AddNotifier(n Notifier) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.notifiers = append(s.notifiers, n)
 }
 
 // Notify returns a channel that closes the next time the store changes. The
@@ -107,7 +116,6 @@ func key(machine, session string) string { return machine + "\x00" + session }
 // and refreshing its last-seen time.
 func (s *Store) Apply(e event.Event) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	k := key(e.Machine, e.SessionID)
 	a := s.agents[k]
@@ -115,6 +123,7 @@ func (s *Store) Apply(e event.Event) {
 		a = &AgentState{Machine: e.Machine, SessionID: e.SessionID}
 		s.agents[k] = a
 	}
+	prev := a.State
 	a.State = event.Apply(a.State, e.Kind)
 	a.LastSeen = e.Time
 	if e.Cwd != "" {
@@ -128,7 +137,25 @@ func (s *Store) Apply(e event.Event) {
 	} else {
 		a.RequestID = ""
 	}
+
+	// Snapshot notifier list and agent state while locked, then dispatch
+	// outside the mutex so notifiers never block the store.
+	var notify []Notifier
+	var snapshot AgentState
+	next := a.State
+	changed := prev != next
+	if changed && len(s.notifiers) > 0 {
+		notify = make([]Notifier, len(s.notifiers))
+		copy(notify, s.notifiers)
+		snapshot = *a
+	}
+
 	s.wake()
+	s.mu.Unlock()
+
+	for _, n := range notify {
+		n.NotifyTransition(snapshot, prev, next)
+	}
 }
 
 // Snapshot returns the current agents with time-derived staleness applied,

@@ -59,6 +59,14 @@ func Run(args []string) error {
 
 	store := NewStore()
 
+	for _, nc := range hosts.Notifiers {
+		store.AddNotifier(buildNotifier(nc.Type))
+	}
+	// Default notifier when none are configured.
+	if len(hosts.Notifiers) == 0 {
+		store.AddNotifier(DefaultNotifier())
+	}
+
 	var wg sync.WaitGroup
 	for _, h := range hosts.Hosts {
 		wg.Add(1)
