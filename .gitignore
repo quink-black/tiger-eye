@@ -1,0 +1,14 @@
+# Build output
+/tiger-eye
+/dist/
+*.exe
+
+# Local config / secrets
+hosts.toml
+node.toml
+
+# Editor / OS
+.DS_Store
+
+# Local CodeBuddy settings (machine-specific)
+.codebuddy/settings.local.json

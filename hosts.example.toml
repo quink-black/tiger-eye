@@ -1,0 +1,36 @@
+# tiger-eye hosts config — copy to ~/.config/tiger-eye/hosts.toml and edit.
+#
+# Each [[host]] is one machine to monitor. Tokens written as "env:NAME" are
+# read from the environment so secrets never sit in this file.
+
+# The machine you run `tiger-eye collect` on.
+[[host]]
+name = "local"
+mode = "local"
+port = 47100
+
+# A LAN box, pulled over an ssh -L tunnel (recommended even on LAN: the remote
+# node stays bound to loopback and is reachable only through your SSH access).
+[[host]]
+name  = "gb10"
+mode  = "ssh"
+ssh   = "gb10.local"        # an entry in ~/.ssh/config
+port  = 47100
+token = "env:TE_TOK_GB10"
+
+# A data-center server reached via a jump host (configure the jump in
+# ~/.ssh/config; the `ssh` alias handles it transparently).
+[[host]]
+name  = "dc-1"
+mode  = "ssh"
+ssh   = "dc-1"
+port  = 47100
+token = "env:TE_TOK_DC1"
+
+# A LAN device pulled by direct HTTP (convenience only; trusted LAN + token).
+# [[host]]
+# name  = "lan-box"
+# mode  = "lan"
+# addr  = "192.168.1.50"
+# port  = 47100
+# token = "env:TE_TOK_LAN"
