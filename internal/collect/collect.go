@@ -169,7 +169,11 @@ func runHeadless(ctx context.Context, store *Store) {
 			snap := store.Snapshot(time.Now())
 			cur := ""
 			for _, a := range snap {
-				cur += fmt.Sprintf("%-12s %-18s %-18s %s\n", a.Machine, string(a.State), a.SessionID, a.Cwd)
+				msg := a.Message
+				if len(msg) > 20 {
+					msg = msg[:19] + "…"
+				}
+				cur += fmt.Sprintf("%-12s %-18s %-20s %-18s %s\n", a.Machine, string(a.State), msg, a.SessionID, a.Cwd)
 			}
 			if cur != last {
 				fmt.Print("\033[H\033[2J")

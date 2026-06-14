@@ -29,6 +29,7 @@ type codebuddyHook struct {
 	NotificationType string `json:"notification_type"`
 	Message          string `json:"message"`
 	RequestID        string `json:"request_id"`
+	ToolName         string `json:"tool_name"`
 }
 
 // Run reads stdin, normalizes, and posts to the node. Errors are logged to
@@ -90,6 +91,11 @@ func normalize(h codebuddyHook) (event.Event, bool) {
 			e.Kind = event.KindAuthSuccess
 		default:
 			return event.Event{}, false
+		}
+	case "PostToolUse":
+		e.Kind = event.KindToolUse
+		if h.ToolName != "" {
+			e.Message = h.ToolName
 		}
 	case "Stop":
 		e.Kind = event.KindStop

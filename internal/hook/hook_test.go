@@ -13,6 +13,7 @@ func TestNormalize(t *testing.T) {
 		wantOK  bool
 		want    event.Kind
 		wantReq string
+		wantMsg string
 	}{
 		{
 			name:    "permission prompt carries request_id",
@@ -32,6 +33,14 @@ func TestNormalize(t *testing.T) {
 			in:     codebuddyHook{HookEventName: "Stop"},
 			wantOK: true,
 			want:   event.KindStop,
+		},
+		{
+			name:    "post tool use maps to tool_use with tool name as message",
+			in:      codebuddyHook{HookEventName: "PostToolUse", ToolName: "Bash"},
+			wantOK:  true,
+			want:    event.KindToolUse,
+			wantReq: "",
+			wantMsg: "Bash",
 		},
 		{
 			name:   "subagent stop",
@@ -68,6 +77,9 @@ func TestNormalize(t *testing.T) {
 			}
 			if e.Source != "codebuddy" {
 				t.Errorf("source = %q, want codebuddy", e.Source)
+			}
+			if c.wantMsg != "" && e.Message != c.wantMsg {
+				t.Errorf("message = %q, want %q", e.Message, c.wantMsg)
 			}
 		})
 	}

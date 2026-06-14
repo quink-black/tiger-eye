@@ -17,6 +17,7 @@ const (
 	KindSubagentStop     Kind = "subagent_stop"
 	KindSessionStart     Kind = "session_start"
 	KindSessionEnd       Kind = "session_end"
+	KindToolUse          Kind = "tool_use"
 )
 
 // Event is one normalized agent state report. It is the single wire format
@@ -83,7 +84,7 @@ func Priority(s State) int {
 
 // Apply maps an incoming event kind onto the next session state. It does not
 // handle staleness, which is time-derived by the collector (see DeriveStale).
-func Apply(_ State, k Kind) State {
+func Apply(cur State, k Kind) State {
 	switch k {
 	case KindPermissionPrompt:
 		return StateWaitingPerm
@@ -97,6 +98,14 @@ func Apply(_ State, k Kind) State {
 		return StateSubagentDone
 	case KindSessionStart, KindAuthSuccess:
 		return StateRunning
+	case KindToolUse:
+		// A tool execution after permission_prompt means the user approved;
+		// the agent resumed work. Preserve other states as-is so tool_use
+		// events during normal running do not cause state drift.
+		if cur == StateWaitingPerm {
+			return StateRunning
+		}
+		return cur
 	default:
 		return StateRunning
 	}

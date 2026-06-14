@@ -8,20 +8,27 @@ import (
 
 func TestApply(t *testing.T) {
 	cases := []struct {
+		cur  State
 		kind Kind
 		want State
 	}{
-		{KindPermissionPrompt, StateWaitingPerm},
-		{KindIdlePrompt, StateIdle},
-		{KindStop, StateDone},
-		{KindSubagentStop, StateSubagentDone},
-		{KindSessionEnd, StateEnded},
-		{KindSessionStart, StateRunning},
-		{KindAuthSuccess, StateRunning},
+		{StateRunning, KindPermissionPrompt, StateWaitingPerm},
+		{StateRunning, KindIdlePrompt, StateIdle},
+		{StateRunning, KindStop, StateDone},
+		{StateRunning, KindSubagentStop, StateSubagentDone},
+		{StateRunning, KindSessionEnd, StateEnded},
+		{StateRunning, KindSessionStart, StateRunning},
+		{StateRunning, KindAuthSuccess, StateRunning},
+		// tool_use resolves waiting_permission -> running
+		{StateWaitingPerm, KindToolUse, StateRunning},
+		// tool_use preserves other states
+		{StateRunning, KindToolUse, StateRunning},
+		{StateIdle, KindToolUse, StateIdle},
+		{StateDone, KindToolUse, StateDone},
 	}
 	for _, c := range cases {
-		if got := Apply(StateRunning, c.kind); got != c.want {
-			t.Errorf("Apply(_, %q) = %q, want %q", c.kind, got, c.want)
+		if got := Apply(c.cur, c.kind); got != c.want {
+			t.Errorf("Apply(%s, %q) = %q, want %q", c.cur, c.kind, got, c.want)
 		}
 	}
 }

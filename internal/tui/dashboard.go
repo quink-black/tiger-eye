@@ -115,18 +115,19 @@ func (m model) View() string {
 		b.WriteString(dimStyle.Render("waiting for events... (no agents reporting yet)"))
 		b.WriteString("\n")
 	} else {
-		b.WriteString(headerStyle.Render(fmt.Sprintf("%-12s %-20s %-10s %-28s %s",
-			"MACHINE", "STATE", "AGE", "CWD", "SESSION")))
+		b.WriteString(headerStyle.Render(fmt.Sprintf("%-12s %-20s %-10s %-28s %-20s %s",
+			"MACHINE", "STATE", "AGE", "CWD", "MESSAGE", "SESSION")))
 		b.WriteString("\n")
 		for _, r := range m.rows {
 			age := humanAge(now.Sub(r.LastSeen))
 			cwd := truncate(r.Cwd, 28)
 			sess := truncate(r.SessionID, 12)
+			msg := truncate(r.Message, 20)
 			// State column padded before styling so ANSI codes do not break width.
 			statePad := fmt.Sprintf("%-20s", r.State)
 			statePad = strings.Replace(statePad, r.State, styleState(r.State), 1)
-			line := fmt.Sprintf("%-12s %s %-10s %-28s %s",
-				truncate(r.Machine, 12), statePad, age, cwd, dimStyle.Render(sess))
+			line := fmt.Sprintf("%-12s %s %-10s %-28s %-20s %s",
+				truncate(r.Machine, 12), statePad, age, cwd, dimStyle.Render(msg), dimStyle.Render(sess))
 			b.WriteString(line)
 			b.WriteString("\n")
 		}
