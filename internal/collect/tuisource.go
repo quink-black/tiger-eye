@@ -23,3 +23,13 @@ func (s *Store) Rows(now time.Time) []tui.Row {
 	}
 	return rows
 }
+
+// Hosts adapts per-host connection health to tui.HostHealth.
+func (s *Store) Hosts() []tui.HostHealth {
+	st := s.HostStatuses()
+	out := make([]tui.HostHealth, len(st))
+	for i, h := range st {
+		out[i] = tui.HostHealth{Name: h.Name, OK: h.OK, Err: h.Err}
+	}
+	return out
+}

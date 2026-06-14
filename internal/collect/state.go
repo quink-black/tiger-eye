@@ -20,16 +20,55 @@ type AgentState struct {
 	LastSeen  time.Time
 }
 
+// HostStatus is the connection health of one configured host, shown as a
+// footer in the dashboard. Errors are recorded here rather than printed to
+// stderr, which would corrupt the TUI's alternate screen.
+type HostStatus struct {
+	Name string
+	OK   bool
+	Err  string // last connection/pull error while not OK
+}
+
 // Store holds the latest derived state for every known agent session. It is the
 // single source of truth the collector writes and the dashboard reads, so it is
 // safe for concurrent use.
 type Store struct {
 	mu     sync.Mutex
 	agents map[string]*AgentState // key: machine\x00session_id
+	hosts  map[string]*HostStatus // key: host name
 }
 
 func NewStore() *Store {
-	return &Store{agents: make(map[string]*AgentState)}
+	return &Store{
+		agents: make(map[string]*AgentState),
+		hosts:  make(map[string]*HostStatus),
+	}
+}
+
+// SetHostOK marks a host as connected (clears any prior error).
+func (s *Store) SetHostOK(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hosts[name] = &HostStatus{Name: name, OK: true}
+}
+
+// SetHostError records a host's latest connection/pull failure.
+func (s *Store) SetHostError(name, msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hosts[name] = &HostStatus{Name: name, OK: false, Err: msg}
+}
+
+// HostStatuses returns the per-host connection health, sorted by name.
+func (s *Store) HostStatuses() []HostStatus {
+	s.mu.Lock()
+	out := make([]HostStatus, 0, len(s.hosts))
+	for _, h := range s.hosts {
+		out = append(out, *h)
+	}
+	s.mu.Unlock()
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 func key(machine, session string) string { return machine + "\x00" + session }

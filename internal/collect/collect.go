@@ -83,11 +83,13 @@ func Run(args []string) error {
 }
 
 // superviseHost keeps a host's transport and poll loop alive, respawning on
-// failure until ctx is cancelled.
+// failure until ctx is cancelled. Failures are recorded on the Store (shown in
+// the dashboard footer) rather than printed, which would corrupt the TUI's
+// alternate screen.
 func superviseHost(ctx context.Context, h config.Host, store *Store) {
 	for ctx.Err() == nil {
 		if err := runHost(ctx, h, store); err != nil && ctx.Err() == nil {
-			fmt.Fprintf(os.Stderr, "host %s: %v (retry in %s)\n", h.Name, err, retryDelay)
+			store.SetHostError(h.Name, err.Error())
 			select {
 			case <-time.After(retryDelay):
 			case <-ctx.Done():
@@ -142,6 +144,7 @@ func runHost(ctx context.Context, h config.Host, store *Store) error {
 			}
 			return err
 		}
+		store.SetHostOK(h.Name)
 		for _, e := range evs {
 			if e.Machine == "" {
 				e.Machine = h.Name

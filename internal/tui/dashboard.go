@@ -24,9 +24,17 @@ type Row struct {
 	LastSeen  time.Time
 }
 
-// Source provides the current sorted snapshot of agent rows.
+// HostHealth is one configured host's connection status, shown in the footer.
+type HostHealth struct {
+	Name string
+	OK   bool
+	Err  string
+}
+
+// Source provides the current sorted snapshot of agent rows and host health.
 type Source interface {
 	Rows(now time.Time) []Row
+	Hosts() []HostHealth
 }
 
 // Run starts the dashboard, refreshing periodically until ctx is cancelled or
@@ -41,9 +49,10 @@ func Run(ctx context.Context, src Source) error {
 type tickMsg time.Time
 
 type model struct {
-	src  Source
-	rows []Row
-	w, h int
+	src   Source
+	rows  []Row
+	hosts []HostHealth
+	w, h  int
 }
 
 func (m model) Init() tea.Cmd { return tick() }
@@ -63,6 +72,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.w, m.h = msg.Width, msg.Height
 	case tickMsg:
 		m.rows = m.src.Rows(time.Now())
+		m.hosts = m.src.Hosts()
 		return m, tick()
 	}
 	return m, nil
@@ -90,38 +100,63 @@ func styleState(s string) string {
 	return s
 }
 
+var (
+	okStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("40"))
+	errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+)
+
 func (m model) View() string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("tiger-eye  ·  agent monitor"))
 	b.WriteString("\n\n")
 
+	now := time.Now()
 	if len(m.rows) == 0 {
 		b.WriteString(dimStyle.Render("waiting for events... (no agents reporting yet)"))
 		b.WriteString("\n")
-		b.WriteString(dimStyle.Render("press q to quit"))
-		return b.String()
-	}
-
-	now := time.Now()
-	b.WriteString(headerStyle.Render(fmt.Sprintf("%-12s %-20s %-10s %-28s %s",
-		"MACHINE", "STATE", "AGE", "CWD", "SESSION")))
-	b.WriteString("\n")
-
-	for _, r := range m.rows {
-		age := humanAge(now.Sub(r.LastSeen))
-		cwd := truncate(r.Cwd, 28)
-		sess := truncate(r.SessionID, 12)
-		// State column padded before styling so ANSI codes do not break width.
-		statePad := fmt.Sprintf("%-20s", r.State)
-		statePad = strings.Replace(statePad, r.State, styleState(r.State), 1)
-		line := fmt.Sprintf("%-12s %s %-10s %-28s %s",
-			truncate(r.Machine, 12), statePad, age, cwd, dimStyle.Render(sess))
-		b.WriteString(line)
+	} else {
+		b.WriteString(headerStyle.Render(fmt.Sprintf("%-12s %-20s %-10s %-28s %s",
+			"MACHINE", "STATE", "AGE", "CWD", "SESSION")))
 		b.WriteString("\n")
+		for _, r := range m.rows {
+			age := humanAge(now.Sub(r.LastSeen))
+			cwd := truncate(r.Cwd, 28)
+			sess := truncate(r.SessionID, 12)
+			// State column padded before styling so ANSI codes do not break width.
+			statePad := fmt.Sprintf("%-20s", r.State)
+			statePad = strings.Replace(statePad, r.State, styleState(r.State), 1)
+			line := fmt.Sprintf("%-12s %s %-10s %-28s %s",
+				truncate(r.Machine, 12), statePad, age, cwd, dimStyle.Render(sess))
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
 	}
 
+	b.WriteString(m.hostFooter())
 	b.WriteString("\n")
 	b.WriteString(dimStyle.Render("sorted by urgency  ·  press q to quit"))
+	return b.String()
+}
+
+// hostFooter renders a one-line-per-host connection summary. Disconnected hosts
+// show their last error (truncated) so failures are visible without corrupting
+// the screen the way raw stderr would.
+func (m model) hostFooter() string {
+	if len(m.hosts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render("hosts:"))
+	b.WriteString("\n")
+	for _, h := range m.hosts {
+		if h.OK {
+			b.WriteString(fmt.Sprintf("  %s %s\n", okStyle.Render("●"), h.Name))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s %-12s %s\n",
+				errStyle.Render("●"), h.Name, dimStyle.Render(truncate(h.Err, 60))))
+		}
+	}
 	return b.String()
 }
 

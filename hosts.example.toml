@@ -3,11 +3,13 @@
 # Each [[host]] is one machine to monitor. Tokens written as "env:NAME" are
 # read from the environment so secrets never sit in this file.
 
-# The machine you run `tiger-eye collect` on.
+# The machine you run `tiger-eye collect` on. The local node enforces the token
+# too, so set it here as well (omit only if you start the node with no token).
 [[host]]
-name = "local"
-mode = "local"
-port = 47100
+name  = "local"
+mode  = "local"
+port  = 47100
+token = "env:TE_TOKEN"
 
 # A LAN machine, pulled over an ssh -L tunnel (recommended even on LAN: the
 # remote node stays bound to loopback and is reachable only through SSH access).

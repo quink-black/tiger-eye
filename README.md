@@ -107,6 +107,7 @@ hosts itself, or a separate one. It just needs SSH access to the others.
 name = "local"
 mode = "local"
 port = 47100
+token = "env:TE_TOKEN"   # the local node enforces the token too
 
 [[host]]
 name = "lan-box"       # a LAN machine — pulled over an ssh -L tunnel
