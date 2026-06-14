@@ -54,7 +54,7 @@ type State string
 const (
 	StateRunning      State = "running"
 	StateWaitingPerm  State = "waiting_permission"
-	StateIdle         State = "idle"
+	StateWaitingInput State = "waiting_input"
 	StateDone         State = "done"
 	StateSubagentDone State = "subagent_done"
 	StateEnded        State = "ended"
@@ -66,7 +66,7 @@ const (
 // need attention than one that cleanly finished.
 var priority = map[State]int{
 	StateWaitingPerm:  0,
-	StateIdle:         1,
+	StateWaitingInput: 1,
 	StateStale:        2,
 	StateDone:         3,
 	StateSubagentDone: 4,
@@ -89,7 +89,7 @@ func Apply(cur State, k Kind) State {
 	case KindPermissionPrompt:
 		return StateWaitingPerm
 	case KindIdlePrompt:
-		return StateIdle
+		return StateWaitingInput
 	case KindSessionEnd:
 		return StateEnded
 	case KindStop:
@@ -121,10 +121,10 @@ const StaleAfter = 2 * time.Minute
 // Only StateRunning can go stale: a running agent that stops emitting events has
 // likely silently died, so surfacing it as stale is useful. Every other state
 // is held as-is:
-//   - waiting_permission / idle are *sticky blocking* states — an agent waiting
-//     for the user stays blocked indefinitely, so demoting it to the lower-
-//     priority grey "stale" would bury the most urgent alert. It must keep
-//     showing as waiting_permission until the user acts.
+//   - waiting_permission / waiting_input are *sticky blocking* states — an
+//     agent waiting for the user stays blocked indefinitely, so demoting it to
+//     the lower-priority grey "stale" would bury the most urgent alert. It must
+//     keep showing as the blocking state until the user acts.
 //   - done / ended / subagent_done are terminal: their last event is final.
 func DeriveStale(s State, lastSeen, now time.Time) bool {
 	if s != StateRunning {

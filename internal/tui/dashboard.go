@@ -6,6 +6,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -114,7 +115,7 @@ var (
 
 	stateStyles = map[string]lipgloss.Style{
 		"waiting_permission": lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")), // red
-		"idle":               lipgloss.NewStyle().Foreground(lipgloss.Color("214")),            // orange
+		"waiting_input":      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")), // orange
 		"stale":              lipgloss.NewStyle().Foreground(lipgloss.Color("244")),            // grey
 		"done":               lipgloss.NewStyle().Foreground(lipgloss.Color("46")),             // green
 		"subagent_done":      lipgloss.NewStyle().Foreground(lipgloss.Color("40")),
@@ -145,19 +146,31 @@ func (m model) View() string {
 		b.WriteString(dimStyle.Render("waiting for events... (no agents reporting yet)"))
 		b.WriteString("\n")
 	} else {
-		b.WriteString(headerStyle.Render(fmt.Sprintf("%-12s %-20s %-10s %-28s %-20s %s",
-			"MACHINE", "STATE", "AGE", "CWD", "MESSAGE", "SESSION")))
+		c := columns(m.w, m.rows)
+		hdr := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %s",
+			c.machine, "MACHINE", c.state, "STATE", c.age, "AGE",
+			c.cwd, "CWD", c.message, "MESSAGE", "SESSION")
+		b.WriteString(headerStyle.Render(hdr))
 		b.WriteString("\n")
 		for _, r := range m.rows {
 			age := humanAge(now.Sub(r.LastSeen))
-			cwd := truncate(r.Cwd, 28)
-			sess := truncate(r.SessionID, 12)
-			msg := truncate(r.Message, 20)
-			// State column padded before styling so ANSI codes do not break width.
-			statePad := fmt.Sprintf("%-20s", r.State)
+			cwd := truncate(collapseHome(r.Cwd), c.cwd)
+			sess := truncate(r.SessionID, c.session)
+			msg := truncate(r.Message, c.message)
+			// State and message columns are padded as plain text *before*
+			// styling: lipgloss emits ANSI escapes that %-*s would miscount,
+			// throwing off every column to the right (notably an empty message
+			// shifting SESSION left).
+			statePad := fmt.Sprintf("%-*s", c.state, r.State)
 			statePad = strings.Replace(statePad, r.State, styleState(r.State), 1)
-			line := fmt.Sprintf("%-12s %s %-10s %-28s %-20s %s",
-				truncate(r.Machine, 12), statePad, age, cwd, dimStyle.Render(msg), dimStyle.Render(sess))
+			msgPad := fmt.Sprintf("%-*s", c.message, msg)
+			if msg != "" {
+				msgPad = strings.Replace(msgPad, msg, dimStyle.Render(msg), 1)
+			}
+			line := fmt.Sprintf("%-*s %s %-*s %-*s %s %s",
+				c.machine, truncate(r.Machine, c.machine), statePad,
+				c.age, age, c.cwd, cwd, msgPad,
+				dimStyle.Render(sess))
 			b.WriteString(line)
 			b.WriteString("\n")
 		}
@@ -189,6 +202,68 @@ func (m model) hostFooter() string {
 		}
 	}
 	return b.String()
+}
+
+// colWidths holds the per-column character budget for one dashboard render.
+type colWidths struct {
+	machine, state, age, cwd, message, session int
+}
+
+// columns sizes the table to its content first, then clamps to the terminal.
+//
+// Each column starts just wide enough for its longest actual value (header
+// included), so short content leaves no dead space — the gripe with the old
+// fixed-width layout. Only when the natural widths overflow totalWidth do the
+// two flex columns (CWD, MESSAGE) shrink, proportionally and down to a floor,
+// to claw back the overflow. STATE/AGE/SESSION stay at their natural size.
+func columns(totalWidth int, rows []Row) colWidths {
+	const (
+		state   = 18 // longest state label: "waiting_permission"
+		age     = 5  // "120m", "23h"
+		gaps    = 5  // single space between the 6 columns
+		minFlex = 12 // floor CWD/MESSAGE shrink to on narrow terminals
+		sessLen = 12 // truncated UUID prefix
+	)
+	// Natural content widths (capped at header label minimums).
+	machine := len("MACHINE")
+	cwd := len("CWD")
+	message := len("MESSAGE")
+	session := len("SESSION")
+	for _, r := range rows {
+		machine = max(machine, len(r.Machine))
+		cwd = max(cwd, len(collapseHome(r.Cwd)))
+		message = max(message, len(r.Message))
+		session = max(session, min(len(r.SessionID), sessLen))
+	}
+
+	if totalWidth < 40 {
+		totalWidth = 200 // pre-resize default; assume a roomy terminal
+	}
+	// Shrink only the flex columns if the row would overflow the terminal.
+	fixed := machine + state + age + session + gaps
+	if over := (fixed + cwd + message) - totalWidth; over > 0 {
+		flex := cwd + message
+		avail := max(totalWidth-fixed, 2*minFlex)
+		cwd = max(cwd*avail/flex, minFlex)
+		message = max(avail-cwd, minFlex)
+	}
+	return colWidths{machine, state, age, cwd, message, session}
+}
+
+// collapseHome shortens an absolute path under the user's home directory to a
+// leading "~" so the CWD column carries more meaningful path tail.
+func collapseHome(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if strings.HasPrefix(p, home+"/") {
+		return "~" + p[len(home):]
+	}
+	return p
 }
 
 func humanAge(d time.Duration) string {

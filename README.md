@@ -1,7 +1,7 @@
 # tiger-eye
 
 Monitor multiple CodeBuddy CLI agents across your local machine and remote SSH
-hosts. When an agent is **waiting for permission**, **idle**, or **done**,
+hosts. When an agent is **waiting for permission**, **waiting for input**, or **done**,
 tiger-eye surfaces it in one live terminal dashboard — so you stop polling tmux
 panes and SSH sessions to find which agent is blocked.
 
@@ -141,7 +141,7 @@ You'll see a live table, most urgent first:
 ```
 MACHINE      STATE                AGE        CWD                          SESSION
 lan-box      waiting_permission   3s         /work/build                  a1b2c3d4…
-dc-1         idle                 1m         /srv/api                     e5f6a7b8…
+dc-1         waiting_input        1m         /srv/api                     e5f6a7b8…
 local        running              12s        /Users/me/proj               90abcdef…
 ```
 
@@ -165,7 +165,7 @@ out of the file.
 | State | Meaning | Goes stale? |
 | --- | --- | --- |
 | `waiting_permission` | agent is blocked on a permission prompt | no — stays the top alert until you act |
-| `idle` | agent waiting for input (>60s) | no |
+| `waiting_input` | agent is blocked waiting for you to respond | no — stays a top alert until you reply |
 | `running` | recently active | yes, after 2 min of silence |
 | `done` | main agent finished (`Stop`) | no (terminal) |
 | `subagent_done` | a subagent finished | no (terminal) |
@@ -173,7 +173,7 @@ out of the file.
 | `stale` | a *running* agent went silent >2 min — may have died | — |
 
 Dashboard sort order (most urgent first):
-`waiting_permission > idle > stale > done > subagent_done > running > ended`.
+`waiting_permission > waiting_input > stale > done > subagent_done > running > ended`.
 
 ## Security
 
