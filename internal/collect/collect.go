@@ -115,6 +115,7 @@ func superviseHost(ctx context.Context, h config.Host, store *Store, ready chan<
 	for ctx.Err() == nil {
 		if err := runHost(ctx, h, store, ready); err != nil && ctx.Err() == nil {
 			store.SetHostError(h.Name, err.Error())
+			store.MarkHostSessionsEnded(h.Name)
 			select {
 			case <-time.After(retryDelay):
 			case <-ctx.Done():

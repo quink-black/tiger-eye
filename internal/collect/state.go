@@ -197,6 +197,29 @@ func (s *Store) Apply(e event.Event) {
 	}
 }
 
+// MarkHostSessionsEnded transitions all non-terminal sessions on the given
+// machine to ended. Call this when a host becomes unreachable, so the
+// dashboard does not permanently show blocking states for dead sessions.
+func (s *Store) MarkHostSessionsEnded(machine string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for _, a := range s.agents {
+		if a.Machine != machine {
+			continue
+		}
+		if a.State == event.StateEnded {
+			continue
+		}
+		a.State = event.StateEnded
+		a.LastSeen = time.Now()
+		changed = true
+	}
+	if changed {
+		s.wake()
+	}
+}
+
 // Snapshot returns the current agents with time-derived staleness applied,
 // sorted by dashboard priority then machine/session for stable rendering.
 func (s *Store) Snapshot(now time.Time) []AgentState {
