@@ -9,14 +9,14 @@ name = "local"
 mode = "local"
 port = 47100
 
-# A LAN box, pulled over an ssh -L tunnel (recommended even on LAN: the remote
-# node stays bound to loopback and is reachable only through your SSH access).
+# A LAN machine, pulled over an ssh -L tunnel (recommended even on LAN: the
+# remote node stays bound to loopback and is reachable only through SSH access).
 [[host]]
-name  = "gb10"
+name  = "lan-box"
 mode  = "ssh"
-ssh   = "gb10.local"        # an entry in ~/.ssh/config
+ssh   = "lan-box"           # an entry in ~/.ssh/config, or an mDNS name
 port  = 47100
-token = "env:TE_TOK_GB10"
+token = "env:TE_TOKEN"
 
 # A data-center server reached via a jump host (configure the jump in
 # ~/.ssh/config; the `ssh` alias handles it transparently).
@@ -25,12 +25,12 @@ name  = "dc-1"
 mode  = "ssh"
 ssh   = "dc-1"
 port  = 47100
-token = "env:TE_TOK_DC1"
+token = "env:TE_TOKEN"
 
 # A LAN device pulled by direct HTTP (convenience only; trusted LAN + token).
 # [[host]]
-# name  = "lan-box"
+# name  = "lan-device"
 # mode  = "lan"
 # addr  = "192.168.1.50"
 # port  = 47100
-# token = "env:TE_TOK_LAN"
+# token = "env:TE_TOKEN"

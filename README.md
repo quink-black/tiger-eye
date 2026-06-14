@@ -11,8 +11,8 @@ hook ──▶ tiger-eye hook ──▶ node (:47100 buffer) ◀══ PULL (ssh
 
 ## Why pull, not push
 
-Data-center servers often **cannot connect back** to your laptop and **forbid
-reverse SSH tunnels** (`ssh -R`). So tiger-eye never has the agent push events
+Data-center servers often **cannot connect back** to the machine you watch from
+and **forbid reverse SSH tunnels** (`ssh -R`). So tiger-eye never has the agent push events
 out. Instead, each host runs a small **node** daemon that buffers its own events
 on a loopback port, and your local **collector** pulls from every host:
 
@@ -35,7 +35,7 @@ to any server and run):
 | --- | --- | --- |
 | `tiger-eye hook` | every agent host | reads a CodeBuddy hook event on stdin, normalizes it, POSTs to the local node |
 | `tiger-eye node` | every agent host | buffers events, serves the token-authed pull API |
-| `tiger-eye collect` | your laptop | pulls from all hosts, tracks per-session state, draws the TUI |
+| `tiger-eye collect` | the monitoring host | pulls from all hosts, tracks per-session state, draws the TUI |
 
 ## Build
 
@@ -94,7 +94,10 @@ tiger-eye node -token "$TIGER_EYE_TOKEN" &
 from the environment, so make sure your CodeBuddy agents run with
 `TIGER_EYE_TOKEN` exported. Then run `/hooks` in CodeBuddy to register them.
 
-### 2. On your laptop
+### 2. On the monitoring host
+
+Pick whichever machine you want to watch from — it can be one of the agent
+hosts itself, or a separate one. It just needs SSH access to the others.
 
 **a. Write the hosts file** at `~/.config/tiger-eye/hosts.toml`
 (see [`hosts.example.toml`](./hosts.example.toml)):
@@ -106,25 +109,24 @@ mode = "local"
 port = 47100
 
 [[host]]
-name = "gb10"          # a LAN box — pulled over an ssh -L tunnel
+name = "lan-box"       # a LAN machine — pulled over an ssh -L tunnel
 mode = "ssh"
-ssh  = "gb10.local"    # an entry in your ~/.ssh/config (jump host handled there)
+ssh  = "lan-box"       # an entry in your ~/.ssh/config (or an mDNS name)
 port = 47100
-token = "env:TE_TOK_GB10"
+token = "env:TE_TOKEN"
 
 [[host]]
 name = "dc-1"          # a data-center server reached via jump host
 mode = "ssh"
 ssh  = "dc-1"
 port = 47100
-token = "env:TE_TOK_DC1"
+token = "env:TE_TOKEN"
 ```
 
-**b. Export the tokens** referenced by `env:`:
+**b. Export the token** referenced by `env:`:
 
 ```bash
-export TE_TOK_GB10='same-token-as-on-gb10'
-export TE_TOK_DC1='same-token-as-on-dc-1'
+export TE_TOKEN='the-shared-token'
 ```
 
 **c. Run the dashboard:**
@@ -137,7 +139,7 @@ You'll see a live table, most urgent first:
 
 ```
 MACHINE      STATE                AGE        CWD                          SESSION
-gb10         waiting_permission   3s         /work/ffmpeg                 a1b2c3d4…
+lan-box      waiting_permission   3s         /work/build                  a1b2c3d4…
 dc-1         idle                 1m         /srv/api                     e5f6a7b8…
 local        running              12s        /Users/me/proj               90abcdef…
 ```
