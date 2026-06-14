@@ -24,16 +24,32 @@ func IsBlocking(s event.State) bool {
 
 // sayNotifier uses macOS `say` to speak a message on blocking state
 // transitions. Falls back to terminal bell if `say` is unavailable.
+// Speech messages are queued so only one `say` runs at a time; overlapping
+// speech is unintelligible.
 type sayNotifier struct {
 	fallback Notifier
+	queue    chan string
 }
 
 func newSayNotifier() Notifier {
-	n := &sayNotifier{}
+	n := &sayNotifier{
+		queue: make(chan string, 16),
+	}
 	if runtime.GOOS != "darwin" {
 		n.fallback = newBellNotifier()
+		return n
 	}
+	go n.speakLoop()
 	return n
+}
+
+// speakLoop drains the message queue serially, running one `say` at a time.
+func (n *sayNotifier) speakLoop() {
+	for msg := range n.queue {
+		if err := exec.Command("say", msg).Run(); err != nil {
+			fmt.Fprint(os.Stderr, "\a")
+		}
+	}
 }
 
 func (n *sayNotifier) NotifyTransition(agent AgentState, prev, next event.State) {
@@ -45,13 +61,12 @@ func (n *sayNotifier) NotifyTransition(agent AgentState, prev, next event.State)
 		return
 	}
 	msg := sayMessage(agent, next)
-	// Run in a goroutine so the store is never blocked on speech synthesis.
-	go func() {
-		if err := exec.Command("say", msg).Run(); err != nil {
-			// say failed (unusual on macOS), fall back to bell this time.
-			fmt.Fprint(os.Stderr, "\a")
-		}
-	}()
+	select {
+	case n.queue <- msg:
+	default:
+		// Queue full; ring the bell so the alert is not silently lost.
+		fmt.Fprint(os.Stderr, "\a")
+	}
 }
 
 func sayMessage(agent AgentState, s event.State) string {

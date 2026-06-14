@@ -99,6 +99,7 @@ func TestStoreApplyDispatchesOnTransition(t *testing.T) {
 	s := NewStore()
 	rec := &recordingNotifier{}
 	s.AddNotifier(rec)
+	s.SetLive()
 
 	e := event.Event{
 		Kind:      event.KindPermissionPrompt,
@@ -123,10 +124,34 @@ func TestStoreApplyDispatchesOnTransition(t *testing.T) {
 	}
 }
 
+func TestStoreApplySuppressesDuringCatchUp(t *testing.T) {
+	s := NewStore()
+	rec := &recordingNotifier{}
+	s.AddNotifier(rec)
+	// Store starts in catchingUp mode: notifications are suppressed.
+
+	e := event.Event{
+		Kind:      event.KindPermissionPrompt,
+		Machine:   "box",
+		SessionID: "s1",
+		Time:      testTime(),
+	}
+	s.Apply(e)
+
+	if len(rec.calls) != 0 {
+		t.Fatalf("expected 0 notifier calls during catch-up, got %d", len(rec.calls))
+	}
+	// But the state should still be applied.
+	if snap := s.Snapshot(testTime()); len(snap) != 1 || snap[0].State != event.StateWaitingPerm {
+		t.Errorf("state not applied during catch-up: %+v", snap)
+	}
+}
+
 func TestStoreApplyNoDispatchOnSameState(t *testing.T) {
 	s := NewStore()
 	rec := &recordingNotifier{}
 	s.AddNotifier(rec)
+	s.SetLive()
 
 	// First event: "" -> running is a real transition.
 	e1 := event.Event{Kind: event.KindSessionStart, Machine: "box", SessionID: "s1", Time: testTime()}
@@ -146,6 +171,7 @@ func TestStoreApplyMultipleNotifiers(t *testing.T) {
 	rec2 := &recordingNotifier{}
 	s.AddNotifier(rec1)
 	s.AddNotifier(rec2)
+	s.SetLive()
 
 	e := event.Event{Kind: event.KindIdlePrompt, Machine: "box", SessionID: "s1", Time: testTime()}
 	s.Apply(e)

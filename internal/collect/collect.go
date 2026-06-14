@@ -67,14 +67,31 @@ func Run(args []string) error {
 		store.AddNotifier(DefaultNotifier())
 	}
 
+	// Each host signals on ready when its first poll batch is applied,
+	// so we can switch the store from catch-up to live mode.
+	ready := make(chan struct{}, len(hosts.Hosts))
+	pending := len(hosts.Hosts)
+
 	var wg sync.WaitGroup
 	for _, h := range hosts.Hosts {
 		wg.Add(1)
 		go func(h config.Host) {
 			defer wg.Done()
-			superviseHost(ctx, h, store)
+			superviseHost(ctx, h, store, ready)
 		}(h)
 	}
+
+	// Wait for all hosts to finish their initial replay, then enable
+	// notifications. Live events after this point are genuine new alerts.
+	go func() {
+		for range ready {
+			pending--
+			if pending == 0 {
+				store.SetLive()
+				return
+			}
+		}
+	}()
 
 	if *noTUI {
 		runHeadless(ctx, store)
@@ -94,9 +111,9 @@ func Run(args []string) error {
 // failure until ctx is cancelled. Failures are recorded on the Store (shown in
 // the dashboard footer) rather than printed, which would corrupt the TUI's
 // alternate screen.
-func superviseHost(ctx context.Context, h config.Host, store *Store) {
+func superviseHost(ctx context.Context, h config.Host, store *Store, ready chan<- struct{}) {
 	for ctx.Err() == nil {
-		if err := runHost(ctx, h, store); err != nil && ctx.Err() == nil {
+		if err := runHost(ctx, h, store, ready); err != nil && ctx.Err() == nil {
 			store.SetHostError(h.Name, err.Error())
 			select {
 			case <-time.After(retryDelay):
@@ -109,7 +126,7 @@ func superviseHost(ctx context.Context, h config.Host, store *Store) {
 
 // runHost establishes the transport for one host and runs its poll loop until
 // an error or ctx cancellation. For ssh hosts it owns the tunnel lifecycle.
-func runHost(ctx context.Context, h config.Host, store *Store) error {
+func runHost(ctx context.Context, h config.Host, store *Store, ready chan<- struct{}) error {
 	var baseURL string
 	var tun *tunnel
 
@@ -136,6 +153,7 @@ func runHost(ctx context.Context, h config.Host, store *Store) error {
 	}
 
 	var since uint64
+	first := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -160,6 +178,10 @@ func runHost(ctx context.Context, h config.Host, store *Store) error {
 			store.Apply(e)
 		}
 		since = last
+		if first {
+			first = false
+			ready <- struct{}{}
+		}
 	}
 }
 

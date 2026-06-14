@@ -37,6 +37,7 @@ type Store struct {
 	agents    map[string]*AgentState // key: machine\x00session_id
 	hosts     map[string]*HostStatus // key: host name
 	notifiers []Notifier
+	catchingUp bool // true during initial replay, suppresses notifications
 
 	// notify is closed and replaced on every state change so any number of
 	// readers (the dashboard) can wake on a fresh channel without per-waiter
@@ -46,10 +47,20 @@ type Store struct {
 
 func NewStore() *Store {
 	return &Store{
-		agents: make(map[string]*AgentState),
-		hosts:  make(map[string]*HostStatus),
-		notify: make(chan struct{}),
+		agents:    make(map[string]*AgentState),
+		hosts:     make(map[string]*HostStatus),
+		notify:    make(chan struct{}),
+		catchingUp: true,
 	}
+}
+
+// SetLive enables notifications. Call after the initial batch of events
+// from all hosts has been folded in, so replaying buffered history does
+// not trigger spurious alerts.
+func (s *Store) SetLive() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.catchingUp = false
 }
 
 // AddNotifier registers a notifier to receive state transition callbacks.
@@ -144,7 +155,7 @@ func (s *Store) Apply(e event.Event) {
 	var snapshot AgentState
 	next := a.State
 	changed := prev != next
-	if changed && len(s.notifiers) > 0 {
+	if changed && len(s.notifiers) > 0 && !s.catchingUp {
 		notify = make([]Notifier, len(s.notifiers))
 		copy(notify, s.notifiers)
 		snapshot = *a
