@@ -32,9 +32,12 @@ type HostHealth struct {
 }
 
 // Source provides the current sorted snapshot of agent rows and host health.
+// Notify returns a channel that closes the next time the underlying state
+// changes, letting the dashboard refresh immediately instead of polling.
 type Source interface {
 	Rows(now time.Time) []Row
 	Hosts() []HostHealth
+	Notify() <-chan struct{}
 }
 
 // Run starts the dashboard, refreshing periodically until ctx is cancelled or
@@ -46,7 +49,13 @@ func Run(ctx context.Context, src Source) error {
 	return err
 }
 
+// tickMsg drives the periodic refresh that recomputes time-derived display
+// values (age column, staleness) even when no new event arrives.
 type tickMsg time.Time
+
+// changeMsg fires the instant the Source's state changes, so an agent landing
+// in waiting_permission shows up immediately rather than on the next tick.
+type changeMsg struct{}
 
 type model struct {
 	src   Source
@@ -55,10 +64,29 @@ type model struct {
 	w, h  int
 }
 
-func (m model) Init() tea.Cmd { return tick() }
+func (m model) Init() tea.Cmd {
+	return tea.Batch(tick(), m.waitChange())
+}
 
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// waitChange blocks on the Source's notify channel and resolves to a changeMsg
+// the moment state changes. It is not a busy loop: the channel only closes when
+// the collector applies an event or a host's status flips.
+func (m model) waitChange() tea.Cmd {
+	ch := m.src.Notify()
+	return func() tea.Msg {
+		<-ch
+		return changeMsg{}
+	}
+}
+
+func (m model) refresh() model {
+	m.rows = m.src.Rows(time.Now())
+	m.hosts = m.src.Hosts()
+	return m
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -70,10 +98,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+	case changeMsg:
+		// State changed: refresh now and re-arm the waiter for the next change.
+		return m.refresh(), m.waitChange()
 	case tickMsg:
-		m.rows = m.src.Rows(time.Now())
-		m.hosts = m.src.Hosts()
-		return m, tick()
+		// Periodic refresh keeps age/staleness current with no new events.
+		return m.refresh(), tick()
 	}
 	return m, nil
 }

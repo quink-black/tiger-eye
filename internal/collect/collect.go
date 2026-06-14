@@ -158,28 +158,34 @@ func runHost(ctx context.Context, h config.Host, store *Store) error {
 // runHeadless prints a compact state table whenever the snapshot changes. Used
 // for debugging and CI where a TUI cannot run.
 func runHeadless(ctx context.Context, store *Store) {
+	// Tick only refreshes time-derived staleness; store changes redraw at once.
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	var last string
+	render := func() {
+		snap := store.Snapshot(time.Now())
+		cur := ""
+		for _, a := range snap {
+			msg := a.Message
+			if len(msg) > 20 {
+				msg = msg[:19] + "…"
+			}
+			cur += fmt.Sprintf("%-12s %-18s %-20s %-18s %s\n", a.Machine, string(a.State), msg, a.SessionID, a.Cwd)
+		}
+		if cur != last {
+			fmt.Print("\033[H\033[2J")
+			fmt.Print(cur)
+			last = cur
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-store.Notify():
+			render()
 		case <-t.C:
-			snap := store.Snapshot(time.Now())
-			cur := ""
-			for _, a := range snap {
-				msg := a.Message
-				if len(msg) > 20 {
-					msg = msg[:19] + "…"
-				}
-				cur += fmt.Sprintf("%-12s %-18s %-20s %-18s %s\n", a.Machine, string(a.State), msg, a.SessionID, a.Cwd)
-			}
-			if cur != last {
-				fmt.Print("\033[H\033[2J")
-				fmt.Print(cur)
-				last = cur
-			}
+			render()
 		}
 	}
 }

@@ -36,27 +36,57 @@ type Store struct {
 	mu     sync.Mutex
 	agents map[string]*AgentState // key: machine\x00session_id
 	hosts  map[string]*HostStatus // key: host name
+
+	// notify is closed and replaced on every state change so any number of
+	// readers (the dashboard) can wake on a fresh channel without per-waiter
+	// bookkeeping. Mirrors node/buffer.go's broadcast pattern.
+	notify chan struct{}
 }
 
 func NewStore() *Store {
 	return &Store{
 		agents: make(map[string]*AgentState),
 		hosts:  make(map[string]*HostStatus),
+		notify: make(chan struct{}),
 	}
+}
+
+// Notify returns a channel that closes the next time the store changes. The
+// caller selects on it once, then calls Notify again for the next change. This
+// lets the dashboard refresh the instant an event lands instead of polling.
+func (s *Store) Notify() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.notify
+}
+
+// wake closes the current notify channel and installs a fresh one. Must be
+// called with s.mu held.
+func (s *Store) wake() {
+	close(s.notify)
+	s.notify = make(chan struct{})
 }
 
 // SetHostOK marks a host as connected (clears any prior error).
 func (s *Store) SetHostOK(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prev := s.hosts[name]
 	s.hosts[name] = &HostStatus{Name: name, OK: true}
+	if prev == nil || !prev.OK {
+		s.wake()
+	}
 }
 
 // SetHostError records a host's latest connection/pull failure.
 func (s *Store) SetHostError(name, msg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prev := s.hosts[name]
 	s.hosts[name] = &HostStatus{Name: name, OK: false, Err: msg}
+	if prev == nil || prev.OK || prev.Err != msg {
+		s.wake()
+	}
 }
 
 // HostStatuses returns the per-host connection health, sorted by name.
@@ -98,6 +128,7 @@ func (s *Store) Apply(e event.Event) {
 	} else {
 		a.RequestID = ""
 	}
+	s.wake()
 }
 
 // Snapshot returns the current agents with time-derived staleness applied,
