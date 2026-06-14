@@ -56,11 +56,39 @@ func NewStore() *Store {
 
 // SetLive enables notifications. Call after the initial batch of events
 // from all hosts has been folded in, so replaying buffered history does
-// not trigger spurious alerts.
+// not trigger spurious alerts. If any agents are already in a blocking
+// state at this point, NotifyBlocking is dispatched so the user is alerted
+// without flooding say.
 func (s *Store) SetLive() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.catchingUp = false
+
+	var blocked []AgentState
+	var notify []Notifier
+	if len(s.notifiers) > 0 {
+		for _, a := range s.agents {
+			if IsBlocking(a.State) {
+				blocked = append(blocked, *a)
+			}
+		}
+		if len(blocked) > 0 {
+			// Map iteration is unordered; sort so the coalesced message
+			// and bell behavior are deterministic across runs.
+			sort.SliceStable(blocked, func(i, j int) bool {
+				if blocked[i].Machine != blocked[j].Machine {
+					return blocked[i].Machine < blocked[j].Machine
+				}
+				return blocked[i].SessionID < blocked[j].SessionID
+			})
+			notify = make([]Notifier, len(s.notifiers))
+			copy(notify, s.notifiers)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, n := range notify {
+		n.NotifyBlocking(blocked)
+	}
 }
 
 // AddNotifier registers a notifier to receive state transition callbacks.

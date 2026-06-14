@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/quink/tiger-eye/internal/config"
 	"github.com/quink/tiger-eye/internal/event"
@@ -13,7 +14,14 @@ import (
 // Notifier receives state transition events. Implementations must be safe for
 // concurrent use.
 type Notifier interface {
+	// NotifyTransition is called when an agent's state changes during live
+	// operation (not during initial catch-up replay).
 	NotifyTransition(agent AgentState, prev, next event.State)
+
+	// NotifyBlocking is called once when catch-up ends if any agents are
+	// already in a blocking state. Implementations should coalesce to avoid
+	// flooding the user with alerts.
+	NotifyBlocking(agents []AgentState)
 }
 
 // IsBlocking reports whether a state is a blocking state that warrants user
@@ -69,6 +77,42 @@ func (n *sayNotifier) NotifyTransition(agent AgentState, prev, next event.State)
 	}
 }
 
+func (n *sayNotifier) NotifyBlocking(agents []AgentState) {
+	if n.fallback != nil {
+		n.fallback.NotifyBlocking(agents)
+		return
+	}
+	if len(agents) == 0 {
+		return
+	}
+	msg := blockingMessage(agents)
+	select {
+	case n.queue <- msg:
+	default:
+		fmt.Fprint(os.Stderr, "\a")
+	}
+}
+
+// blockingMessage coalesces already-blocked agents into a single speech
+// message to avoid flooding the user with say calls on startup.
+func blockingMessage(agents []AgentState) string {
+	switch len(agents) {
+	case 1:
+		return sayMessage(agents[0], agents[0].State)
+	case 2:
+		return sayMessage(agents[0], agents[0].State) + ", " +
+			strings.ToLower(sayMessage(agents[1], agents[1].State))
+	default:
+		machines := make([]string, len(agents))
+		for i, a := range agents {
+			machines[i] = a.Machine
+		}
+		return fmt.Sprintf("%d agents waiting on %s and %s",
+			len(agents), strings.Join(machines[:len(machines)-1], ", "),
+			machines[len(machines)-1])
+	}
+}
+
 func sayMessage(agent AgentState, s event.State) string {
 	switch s {
 	case event.StateWaitingPerm:
@@ -90,6 +134,13 @@ func newBellNotifier() Notifier {
 
 func (n *bellNotifier) NotifyTransition(agent AgentState, prev, next event.State) {
 	if !IsBlocking(next) {
+		return
+	}
+	fmt.Fprint(os.Stderr, "\a")
+}
+
+func (n *bellNotifier) NotifyBlocking(agents []AgentState) {
+	if len(agents) == 0 {
 		return
 	}
 	fmt.Fprint(os.Stderr, "\a")
