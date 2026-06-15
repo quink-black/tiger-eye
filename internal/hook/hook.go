@@ -194,7 +194,9 @@ func normalizeCodex(h codexHook) (event.Event, bool) {
 			e.Message = h.ToolName
 		}
 	case "UserPromptSubmit":
-		e.Kind = event.KindIdlePrompt
+		// Codex fires this after the user types input (including approving
+		// a permission prompt). The agent is now running, not idle.
+		e.Kind = event.KindAuthSuccess
 	case "PostToolUse":
 		e.Kind = event.KindToolUse
 		if h.ToolName != "" {

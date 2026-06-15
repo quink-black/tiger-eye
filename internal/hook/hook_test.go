@@ -121,10 +121,10 @@ func TestNormalizeCodex(t *testing.T) {
 			wantMsg: "Bash",
 		},
 		{
-			name:   "user prompt submit maps to idle prompt",
+			name:   "user prompt submit maps to auth success",
 			in:     codexHook{HookEventName: "UserPromptSubmit", Prompt: "fix the bug"},
 			wantOK: true,
-			want:   event.KindIdlePrompt,
+			want:   event.KindAuthSuccess,
 		},
 		{
 			name:    "post tool use",
