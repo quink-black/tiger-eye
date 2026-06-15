@@ -26,7 +26,7 @@ No Makefile, no CI configuration. Builds with raw `go build`.
 
 ## Architecture
 
-A single Go binary with three subcommands, organized as packages under `internal/`:
+A single Go binary with four subcommands, organized as packages under `internal/`:
 
 ```
 CodeBuddy Agent --hook--> tiger-eye hook --POST /ingest--> tiger-eye node (ring buffer)
@@ -45,6 +45,7 @@ tiger-eye collect <--GET /events?since=N&wait=MS--------- tiger-eye node
 | `hook` | `internal/hook` | every agent host | Reads CodeBuddy hook JSON from stdin, normalizes to `event.Event`, POSTs to local node. Always returns exit 0 (errors go to stderr only) so monitoring never blocks the agent. |
 | `node` | `internal/node` | every agent host | Buffers events in memory, serves 4 HTTP endpoints (`/healthz`, `/ingest`, `/events`, `/sessions`) on loopback with bearer-token auth. |
 | `collect` | `internal/collect` | monitoring host | Pulls from all hosts (loopback, direct HTTP, or `ssh -L` tunnel), folds events into a shared `Store`, drives the TUI. |
+| `stand` | `internal/standalone` | single-machine host | Runs node + collect in one process. Auto-creates a local host entry for the embedded node; loads hosts.toml if present to also pull from remote hosts. Quick-start for users who only monitor agents on their own device. |
 
 ### Packages
 
@@ -53,8 +54,9 @@ tiger-eye collect <--GET /events?since=N&wait=MS--------- tiger-eye node
 | `internal/event` | Shared event schema + state machine. Zero external deps. | `Event`, `Kind`, `State`, `Apply(Kind) State`, `Priority(State) int`, `DeriveStale(...)` |
 | `internal/config` | Hand-rolled TOML parser for `~/.config/tiger-eye/hosts.toml`. Understands only `[[host]]` tables and flat `key = value`. | `Host`, `Hosts`, `LoadHosts(path)` |
 | `internal/hook` | CodeBuddy hook stdin normalization + HTTP POST to node. | `Run(args)`, `normalize(...)`, `post(...)` |
-| `internal/node` | Per-host HTTP daemon with ring buffer and long-poll. | `server`, `buffer` (channel-close-and-replace broadcast) |
-| `internal/collect` | Orchestrator: SSH tunnels, pull loop, per-session state store. | `Store`, `puller`, `tunnel`, `AgentState`, `HostStatus` |
+| `internal/node` | Per-host HTTP daemon with ring buffer and long-poll. | `Server`, `New()`, `ListenAndServe()`, `Shutdown()`, `buffer` (channel-close-and-replace broadcast) |
+| `internal/collect` | Orchestrator: SSH tunnels, pull loop, per-session state store. | `Store`, `RunWithHosts()`, `puller`, `tunnel`, `AgentState`, `HostStatus` |
+| `internal/standalone` | Quick-start mode: node + collect in one process. | `Run(args)` |
 | `internal/tui` | Bubble Tea dashboard with lipgloss styling. | `model`, `Source` interface, `Row`, `HostHealth` |
 
 ### Key design decisions

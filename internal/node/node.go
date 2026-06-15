@@ -5,6 +5,7 @@
 package node
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"flag"
@@ -22,10 +23,65 @@ import (
 // pull over `ssh -L` does not get torn down mid-wait.
 const maxWait = 25 * time.Second
 
-type server struct {
+// Server is the per-host node daemon. It buffers events posted by the local
+// hook and serves a pull API to the collector. Create one with New, then call
+// ListenAndServe to start it.
+type Server struct {
 	buf     *buffer
 	token   string
 	machine string
+	addr    string
+	port    int
+	srv     *http.Server
+}
+
+// New creates a Server that will listen on loopback at the given port. The
+// token and machine fields use the same conventions as the node subcommand
+// flags; empty machine falls back to os.Hostname.
+func New(port int, token, machine string) *Server {
+	if machine == "" {
+		machine, _ = os.Hostname()
+	}
+	return &Server{
+		buf:     newBuffer(2048),
+		token:   token,
+		machine: machine,
+		addr:    "127.0.0.1",
+		port:    port,
+	}
+}
+
+// Port returns the configured listen port.
+func (s *Server) Port() int { return s.port }
+
+// Machine returns the machine name stamped on events.
+func (s *Server) Machine() string { return s.machine }
+
+// ListenAndServe starts the HTTP server. It blocks until the server exits.
+func (s *Server) ListenAndServe() error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/ingest", s.auth(s.handleIngest))
+	mux.HandleFunc("/events", s.auth(s.handleEvents))
+	mux.HandleFunc("/sessions", s.auth(s.handleSessions))
+
+	listen := fmt.Sprintf("%s:%d", s.addr, s.port)
+	fmt.Fprintf(os.Stderr, "tiger-eye node listening on %s (machine=%s)\n", listen, s.machine)
+	s.srv = &http.Server{
+		Addr:              listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	return s.srv.ListenAndServe()
+}
+
+// Shutdown gracefully stops the HTTP server. Call after ListenAndServe returns
+// or from a separate goroutine.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.srv != nil {
+		return s.srv.Shutdown(ctx)
+	}
+	return nil
 }
 
 // Run parses flags and starts the node daemon. Flags:
@@ -44,36 +100,14 @@ func Run(args []string) error {
 		return err
 	}
 
-	name := *machine
-	if name == "" {
-		name, _ = os.Hostname()
-	}
-
-	s := &server{
-		buf:     newBuffer(2048),
-		token:   *token,
-		machine: name,
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", s.handleHealthz)
-	mux.HandleFunc("/ingest", s.auth(s.handleIngest))
-	mux.HandleFunc("/events", s.auth(s.handleEvents))
-	mux.HandleFunc("/sessions", s.auth(s.handleSessions))
-
-	listen := fmt.Sprintf("%s:%d", *addr, *port)
-	fmt.Fprintf(os.Stderr, "tiger-eye node listening on %s (machine=%s)\n", listen, name)
-	srv := &http.Server{
-		Addr:              listen,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	return srv.ListenAndServe()
+	s := New(*port, *token, *machine)
+	s.addr = *addr
+	return s.ListenAndServe()
 }
 
 // auth wraps a handler with constant-time bearer-token verification. An empty
 // configured token disables auth (loopback-only dev convenience).
-func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
+func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.token != "" {
 			got := r.Header.Get("Authorization")
@@ -87,12 +121,12 @@ func (s *server) auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (s *server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ok":true,"machine":%q}`, s.machine)
 }
 
-func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -118,7 +152,7 @@ type eventsResponse struct {
 	LastSeq uint64        `json:"last_seq"`
 }
 
-func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
 	wait := parseWait(r.URL.Query().Get("wait"))
 
@@ -139,7 +173,7 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(eventsResponse{Events: evs, LastSeq: last})
 }
 
-func (s *server) handleSessions(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleSessions(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(readSessions())
 }

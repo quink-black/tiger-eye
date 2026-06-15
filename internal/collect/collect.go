@@ -51,6 +51,13 @@ func Run(args []string) error {
 		return fmt.Errorf("no hosts configured in %s", path)
 	}
 
+	return RunWithHosts(hosts.Hosts, hosts.Notifiers, *noTUI)
+}
+
+// RunWithHosts starts the collector using the given host list and notifiers,
+// bypassing the hosts.toml file. This lets callers (e.g. the standalone mode)
+// inject a synthetic local host without maintaining a config file.
+func RunWithHosts(hosts []config.Host, notifiers []config.NotifierConfig, noTUI bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sig := make(chan os.Signal, 1)
@@ -59,21 +66,18 @@ func Run(args []string) error {
 
 	store := NewStore()
 
-	for _, nc := range hosts.Notifiers {
+	for _, nc := range notifiers {
 		store.AddNotifier(buildNotifier(nc.Type))
 	}
-	// Default notifier when none are configured.
-	if len(hosts.Notifiers) == 0 {
+	if len(notifiers) == 0 {
 		store.AddNotifier(DefaultNotifier())
 	}
 
-	// Each host signals on ready when its first poll batch is applied,
-	// so we can switch the store from catch-up to live mode.
-	ready := make(chan struct{}, len(hosts.Hosts))
-	pending := len(hosts.Hosts)
+	ready := make(chan struct{}, len(hosts))
+	pending := len(hosts)
 
 	var wg sync.WaitGroup
-	for _, h := range hosts.Hosts {
+	for _, h := range hosts {
 		wg.Add(1)
 		go func(h config.Host) {
 			defer wg.Done()
@@ -81,8 +85,6 @@ func Run(args []string) error {
 		}(h)
 	}
 
-	// Wait for all hosts to finish their initial replay, then enable
-	// notifications. Live events after this point are genuine new alerts.
 	go func() {
 		for range ready {
 			pending--
@@ -93,7 +95,7 @@ func Run(args []string) error {
 		}
 	}()
 
-	if *noTUI {
+	if noTUI {
 		runHeadless(ctx, store)
 	} else {
 		if err := tui.Run(ctx, store); err != nil {
