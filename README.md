@@ -1,9 +1,9 @@
 # tiger-eye
 
-Monitor multiple CodeBuddy CLI agents across your local machine and remote SSH
-hosts. When an agent is **waiting for permission**, **waiting for input**, or **done**,
-tiger-eye surfaces it in one live terminal dashboard — so you stop polling tmux
-panes and SSH sessions to find which agent is blocked.
+Monitor multiple CodeBuddy and Codex CLI agents across your local machine and
+remote SSH hosts. When an agent is **waiting for permission**, **waiting for
+input**, or **done**, tiger-eye surfaces it in one live terminal dashboard — so
+you stop polling tmux panes and SSH sessions to find which agent is blocked.
 
 ```
 hook ──▶ tiger-eye hook ──▶ node (:47100 buffer) ◀══ PULL (ssh -L) ══ collector ──▶ TUI
@@ -28,14 +28,16 @@ tunnel — the same secure posture on LAN and DC.
 
 ## Components
 
-A single static Go binary with three subcommands (zero runtime deps — `scp` it
+A single static Go binary with five subcommands (zero runtime deps — `scp` it
 to any server and run):
 
 | Subcommand | Runs on | Role |
 | --- | --- | --- |
 | `tiger-eye hook` | every agent host | reads a CodeBuddy hook event on stdin, normalizes it, POSTs to the local node |
+| `tiger-eye codex-hook` | every agent host | reads an OpenAI Codex hook event on stdin, normalizes it, POSTs to the local node |
 | `tiger-eye node` | every agent host | buffers events, serves the token-authed pull API |
 | `tiger-eye collect` | the monitoring host | pulls from all hosts, tracks per-session state, draws the TUI |
+| `tiger-eye stand` | single-machine host | runs node + collect in one process for quick-start use |
 
 ## Build
 
@@ -93,6 +95,51 @@ tiger-eye node -token "$TIGER_EYE_TOKEN" &
 `tiger-eye hook` reads `TIGER_EYE_TOKEN` and `TIGER_EYE_PORT` (default 47100)
 from the environment, so make sure your CodeBuddy agents run with
 `TIGER_EYE_TOKEN` exported. Then run `/hooks` in CodeBuddy to register them.
+
+**e. (Optional) Wire up Codex hooks.** Codex uses a TOML config file at
+`~/.codex/config.toml`. Add `[[hooks.*]]` sections pointing at
+`tiger-eye codex-hook`:
+
+```toml
+[[hooks.SessionStart]]
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "tiger-eye codex-hook"
+
+[[hooks.SubagentStart]]
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = "tiger-eye codex-hook"
+
+[[hooks.PermissionRequest]]
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = "tiger-eye codex-hook"
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "tiger-eye codex-hook"
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "tiger-eye codex-hook"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "tiger-eye codex-hook"
+
+[[hooks.SubagentStop]]
+[[hooks.SubagentStop.hooks]]
+type = "command"
+command = "tiger-eye codex-hook"
+```
+
+`tiger-eye codex-hook` supports the same `TIGER_EYE_TOKEN` and `TIGER_EYE_PORT`
+environment variables. Codex sessions appear in the dashboard with a `codex`
+source tag next to the machine name.
 
 ### 2. On the monitoring host
 
