@@ -6,6 +6,7 @@
 # Local config / secrets
 hosts.toml
 node.toml
+token
 
 # Editor / OS
 .DS_Store

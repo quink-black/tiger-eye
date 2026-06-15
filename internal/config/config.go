@@ -61,11 +61,46 @@ type NotifierConfig struct {
 
 // DefaultHostsPath returns ~/.config/tiger-eye/hosts.toml.
 func DefaultHostsPath() (string, error) {
+	dir, err := defaultDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "hosts.toml"), nil
+}
+
+// DefaultTokenPath returns ~/.config/tiger-eye/token.
+func DefaultTokenPath() (string, error) {
+	dir, err := defaultDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "token"), nil
+}
+
+// Token reads the bearer token: $TIGER_EYE_TOKEN first, then falls back to
+// ~/.config/tiger-eye/token. This makes the token available regardless of
+// how the agent was launched (login shell, GUI IDE, etc.).
+func Token() string {
+	if t := os.Getenv("TIGER_EYE_TOKEN"); t != "" {
+		return t
+	}
+	path, err := DefaultTokenPath()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func defaultDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "tiger-eye", "hosts.toml"), nil
+	return filepath.Join(home, ".config", "tiger-eye"), nil
 }
 
 // LoadHosts parses the hosts file at path. Tokens written as "env:NAME" are

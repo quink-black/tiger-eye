@@ -78,7 +78,7 @@ func RunCodex(args []string) error {
 func runHook(name string, args []string, normalizeFunc func(json.RawMessage) (event.Event, bool)) error {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	port := fs.Int("port", envPort(), "local node port")
-	token := fs.String("token", os.Getenv("TIGER_EYE_TOKEN"), "bearer token (or set TIGER_EYE_TOKEN)")
+	token := fs.String("token", config.Token(), "bearer token (env TIGER_EYE_TOKEN, or ~/.config/tiger-eye/token)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

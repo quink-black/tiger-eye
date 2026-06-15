@@ -94,7 +94,7 @@ func Run(args []string) error {
 	fs := flag.NewFlagSet("node", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1", "listen address (loopback by default; use ssh -L to reach remotely)")
 	port := fs.Int("port", config.DefaultPort, "listen port")
-	token := fs.String("token", os.Getenv("TIGER_EYE_TOKEN"), "bearer token (or set TIGER_EYE_TOKEN)")
+	token := fs.String("token", config.Token(), "bearer token (env TIGER_EYE_TOKEN, or ~/.config/tiger-eye/token)")
 	machine := fs.String("machine", "", "machine name stamped on events (default: hostname)")
 	if err := fs.Parse(args); err != nil {
 		return err
