@@ -62,21 +62,25 @@ Copy the binary over:
 scp tiger-eye-linux-arm64 myserver:/usr/local/bin/tiger-eye
 ```
 
-Pick a shared token and export it:
+Pick a shared token and save it (the node reads `$TIGER_EYE_TOKEN` first,
+then falls back to `~/.config/tiger-eye/token`):
 
 ```bash
 export TIGER_EYE_TOKEN='choose-a-long-random-string'
+# Or persist it so non-login shells (GUI IDEs, launchd) can find it:
+mkdir -p ~/.config/tiger-eye && echo 'choose-a-long-random-string' > ~/.config/tiger-eye/token
 ```
 
 Start the node (loopback only — safe by default):
 
 ```bash
-tiger-eye node -token "$TIGER_EYE_TOKEN" &
+tiger-eye node &
 # tiger-eye node listening on 127.0.0.1:47100
 ```
 
 Wire up the same CodeBuddy hooks as in the single-machine quick start above.
-Make sure the agent process has `TIGER_EYE_TOKEN` in its environment.
+Make sure the agent process can reach the token — either via `TIGER_EYE_TOKEN`
+in its environment or the token file.
 
 #### Codex CLI (optional)
 
@@ -214,7 +218,8 @@ Dashboard sort order (most urgent first):
 - Nodes bind `127.0.0.1` by default; remote nodes are reachable only through
   your own `ssh -L` tunnel.
 - Use `mode = "ssh"` even on LAN unless you specifically want direct HTTP.
-- Keep tokens out of the config file with `env:` indirection.
+- Keep tokens out of the config file with `env:` indirection, or persist them
+  to `~/.config/tiger-eye/token` for environments where env vars are unavailable.
 
 ## More
 
