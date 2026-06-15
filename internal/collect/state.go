@@ -15,6 +15,7 @@ type AgentState struct {
 	SessionID string
 	Cwd       string
 	State     event.State
+	Source    string // producing adapter, e.g. "codebuddy", "codex"
 	Message   string
 	RequestID string // non-empty while a permission decision can be relayed
 	LastSeen  time.Time
@@ -167,6 +168,9 @@ func (s *Store) Apply(e event.Event) {
 	a.LastSeen = e.Time
 	if e.Cwd != "" {
 		a.Cwd = e.Cwd
+	}
+	if e.Source != "" {
+		a.Source = e.Source
 	}
 	a.Message = e.Message
 	// Track the pending permission request; clear it once the prompt resolves

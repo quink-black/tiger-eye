@@ -18,6 +18,7 @@ import (
 // by the tui package to keep the dependency one-way.
 type Row struct {
 	Machine   string
+	Source    string // "codebuddy", "codex"
 	SessionID string
 	Cwd       string
 	State     string
@@ -157,6 +158,7 @@ func (m model) View() string {
 			cwd := truncate(collapseHome(r.Cwd), c.cwd)
 			sess := truncate(r.SessionID, c.session)
 			msg := truncate(r.Message, c.message)
+			machine := truncate(displayMachine(r.Machine, r.Source), c.machine)
 			// State and message columns are padded as plain text *before*
 			// styling: lipgloss emits ANSI escapes that %-*s would miscount,
 			// throwing off every column to the right (notably an empty message
@@ -168,7 +170,7 @@ func (m model) View() string {
 				msgPad = strings.Replace(msgPad, msg, dimStyle.Render(msg), 1)
 			}
 			line := fmt.Sprintf("%-*s %s %-*s %-*s %s %s",
-				c.machine, truncate(r.Machine, c.machine), statePad,
+				c.machine, machine, statePad,
 				c.age, age, c.cwd, cwd, msgPad,
 				dimStyle.Render(sess))
 			b.WriteString(line)
@@ -209,6 +211,19 @@ type colWidths struct {
 	machine, state, age, cwd, message, session int
 }
 
+// displayMachine combines the machine name and source for the MACHINE column.
+// The source is shown as a short suffix when there are multiple sources.
+func displayMachine(machine, source string) string {
+	if source != "" && source != "codebuddy" {
+		return machine + " " + source
+	}
+	return machine
+}
+
+// sourceTagLen is the extra width a source suffix adds to the machine column
+// (space + source name). Only codex is longer than codebuddy.
+const sourceTagLen = 1 + len("codex")
+
 // columns sizes the table to its content first, then clamps to the terminal.
 //
 // Each column starts just wide enough for its longest actual value (header
@@ -230,7 +245,11 @@ func columns(totalWidth int, rows []Row) colWidths {
 	message := len("MESSAGE")
 	session := len("SESSION")
 	for _, r := range rows {
-		machine = max(machine, len(r.Machine))
+		w := max(len(r.Machine), len("MACHINE"))
+		if r.Source != "" && r.Source != "codebuddy" {
+			w += sourceTagLen
+		}
+		machine = max(machine, w)
 		cwd = max(cwd, len(collapseHome(r.Cwd)))
 		message = max(message, len(r.Message))
 		session = max(session, min(len(r.SessionID), sessLen))

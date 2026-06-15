@@ -1,6 +1,6 @@
-// Package hook implements `tiger-eye hook`: it reads a CodeBuddy hook payload
-// on stdin, normalizes it to the shared event schema, and posts it to the local
-// node. It is invoked by CodeBuddy `command` hooks and must always exit 0 so a
+// Package hook implements `tiger-eye hook` and `tiger-eye codex-hook`: each
+// reads a hook payload on stdin, normalizes it to the shared event schema,
+// and posts it to the local node. Both subcommands must always exit 0 so a
 // monitoring failure never blocks the agent.
 package hook
 
@@ -32,10 +32,51 @@ type codebuddyHook struct {
 	ToolName         string `json:"tool_name"`
 }
 
-// Run reads stdin, normalizes, and posts to the node. Errors are logged to
-// stderr but never propagate: Run always returns nil so CodeBuddy sees exit 0.
+// codexHook is the subset of Codex's hook stdin JSON we consume. Fields absent
+// for a given event simply stay zero. See
+// https://developers.openai.com/codex/hooks for the full schema.
+type codexHook struct {
+	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
+	Cwd            string `json:"cwd"`
+	HookEventName  string `json:"hook_event_name"`
+	Model          string `json:"model"`
+	TurnID         string `json:"turn_id"`
+	PermissionMode string `json:"permission_mode"`
+	// SessionStart
+	Source string `json:"source"` // "startup", "resume", "clear", "compact"
+	// SubagentStart / SubagentStop
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type"`
+	// Tool events
+	ToolName  string `json:"tool_name"`
+	ToolUseID string `json:"tool_use_id"`
+	ToolInput string `json:"tool_input"`
+	// UserPromptSubmit
+	Prompt string `json:"prompt"`
+	// Stop / SubagentStop
+	StopHookActive       bool   `json:"stop_hook_active"`
+	LastAssistantMessage string `json:"last_assistant_message"`
+	// PreCompact / PostCompact
+	Trigger string `json:"trigger"`
+}
+
+// Run reads a CodeBuddy hook payload on stdin, normalizes it, and posts to the
+// node. Errors are logged to stderr but never propagate.
 func Run(args []string) error {
-	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
+	return runHook("hook", args, normalizeCB)
+}
+
+// RunCodex reads a Codex hook payload on stdin, normalizes it, and posts to the
+// node. Errors are logged to stderr but never propagate.
+func RunCodex(args []string) error {
+	return runHook("codex-hook", args, normalizeCodexRaw)
+}
+
+// runHook is the shared core: parse flags, read stdin, normalize, post.
+// name is the subcommand name used in warning messages.
+func runHook(name string, args []string, normalizeFunc func(json.RawMessage) (event.Event, bool)) error {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	port := fs.Int("port", envPort(), "local node port")
 	token := fs.String("token", os.Getenv("TIGER_EYE_TOKEN"), "bearer token (or set TIGER_EYE_TOKEN)")
 	if err := fs.Parse(args); err != nil {
@@ -44,26 +85,39 @@ func Run(args []string) error {
 
 	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		warn("read stdin: %v", err)
+		warnf(name, "read stdin: %v", err)
 		return nil
 	}
 
-	var h codebuddyHook
-	if err := json.Unmarshal(data, &h); err != nil {
-		warn("parse hook json: %v", err)
-		return nil
-	}
-
-	e, ok := normalize(h)
+	e, ok := normalizeFunc(json.RawMessage(data))
 	if !ok {
-		// Event we do not track; nothing to report.
 		return nil
 	}
 
 	if err := post(*port, *token, e); err != nil {
-		warn("post to node: %v", err)
+		warnf(name, "post to node: %v", err)
 	}
 	return nil
+}
+
+// normalizeCB unmarshals a CodeBuddy hook payload and normalizes it.
+func normalizeCB(raw json.RawMessage) (event.Event, bool) {
+	var h codebuddyHook
+	if err := json.Unmarshal(raw, &h); err != nil {
+		warnf("hook", "parse hook json: %v", err)
+		return event.Event{}, false
+	}
+	return normalize(h)
+}
+
+// normalizeCodexRaw unmarshals a Codex hook payload and normalizes it.
+func normalizeCodexRaw(raw json.RawMessage) (event.Event, bool) {
+	var h codexHook
+	if err := json.Unmarshal(raw, &h); err != nil {
+		warnf("codex-hook", "parse hook json: %v", err)
+		return event.Event{}, false
+	}
+	return normalizeCodex(h)
 }
 
 // normalize maps a CodeBuddy hook payload to a tiger-eye event. The second
@@ -111,6 +165,52 @@ func normalize(h codebuddyHook) (event.Event, bool) {
 	return e, true
 }
 
+// normalizeCodex maps a Codex hook payload to a tiger-eye event. The second
+// return is false for hook events that do not correspond to a tracked state.
+func normalizeCodex(h codexHook) (event.Event, bool) {
+	e := event.Event{
+		Source:         "codex",
+		Cwd:            h.Cwd,
+		SessionID:      h.SessionID,
+		TranscriptPath: h.TranscriptPath,
+		PermissionMode: h.PermissionMode,
+		Time:           time.Now().UTC(),
+	}
+
+	switch h.HookEventName {
+	case "SessionStart":
+		e.Kind = event.KindSessionStart
+		if h.Source != "" {
+			e.Message = h.Source
+		}
+	case "SubagentStart":
+		e.Kind = event.KindSessionStart
+		if h.AgentType != "" {
+			e.Message = h.AgentType
+		}
+	case "PermissionRequest":
+		e.Kind = event.KindPermissionPrompt
+		if h.ToolName != "" {
+			e.Message = h.ToolName
+		}
+	case "UserPromptSubmit":
+		e.Kind = event.KindIdlePrompt
+	case "PostToolUse":
+		e.Kind = event.KindToolUse
+		if h.ToolName != "" {
+			e.Message = h.ToolName
+		}
+	case "Stop":
+		e.Kind = event.KindStop
+	case "SubagentStop":
+		e.Kind = event.KindSubagentStop
+	default:
+		// PreToolUse, PreCompact, PostCompact: no useful state signal.
+		return event.Event{}, false
+	}
+	return e, true
+}
+
 func post(port int, token string, e event.Event) error {
 	body, err := json.Marshal(e)
 	if err != nil {
@@ -147,6 +247,6 @@ func envPort() int {
 	return config.DefaultPort
 }
 
-func warn(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "tiger-eye hook: "+format+"\n", a...)
+func warnf(name, format string, a ...any) {
+	fmt.Fprintf(os.Stderr, "tiger-eye %s: "+format+"\n", append([]any{name}, a...)...)
 }

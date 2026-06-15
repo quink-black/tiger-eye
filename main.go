@@ -1,9 +1,11 @@
-// Command tiger-eye monitors CodeBuddy CLI agents across local and remote
-// machines. It has four subcommands; a bare invocation defaults to stand:
+// Command tiger-eye monitors CodeBuddy and Codex CLI agents across local and
+// remote machines. It has five subcommands; a bare invocation defaults to stand:
 //
 //	tiger-eye          run node + collect in one process (default; quick-start
 //	                   for single-machine use). Equivalent to "tiger-eye stand".
 //	tiger-eye hook     normalize a CodeBuddy hook event (stdin) and post it to
+//	                   the local node daemon.
+//	tiger-eye codex-hook normalize a Codex hook event (stdin) and post it to
 //	                   the local node daemon.
 //	tiger-eye node     run the per-host node daemon: buffer events and serve
 //	                   the pull API.
@@ -46,6 +48,8 @@ func main() {
 	switch cmd {
 	case "hook":
 		err = hook.Run(args)
+	case "codex-hook":
+		err = hook.RunCodex(args)
 	case "node":
 		err = node.Run(args)
 	case "collect":
@@ -65,13 +69,14 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `tiger-eye - monitor CodeBuddy agents across machines
+	fmt.Fprint(os.Stderr, `tiger-eye - monitor CodeBuddy and Codex agents across machines
 
 Usage:
-  tiger-eye [flags]           run node + collect in one process (default)
-  tiger-eye hook              read a hook event on stdin and post it to the local node
-  tiger-eye node [flags]      run the per-host node daemon
-  tiger-eye collect [flags]   run the local collector and TUI dashboard
+  tiger-eye [flags]             run node + collect in one process (default)
+  tiger-eye hook                read a CodeBuddy hook event on stdin and post it to the local node
+  tiger-eye codex-hook          read a Codex hook event on stdin and post it to the local node
+  tiger-eye node [flags]        run the per-host node daemon
+  tiger-eye collect [flags]     run the local collector and TUI dashboard
 
 Run "tiger-eye -h" or "tiger-eye <subcommand> -h" for flags.
 `)

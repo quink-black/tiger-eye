@@ -14,6 +14,7 @@ func (s *Store) Rows(now time.Time) []tui.Row {
 	for i, a := range snap {
 		rows[i] = tui.Row{
 			Machine:   a.Machine,
+			Source:    a.Source,
 			SessionID: a.SessionID,
 			Cwd:       a.Cwd,
 			State:     string(a.State),
