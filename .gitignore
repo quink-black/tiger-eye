@@ -10,5 +10,5 @@ node.toml
 # Editor / OS
 .DS_Store
 
-# Local CodeBuddy settings (machine-specific)
-.codebuddy/settings.local.json
+# Local CodeBuddy settings and notes (machine-specific)
+/.codebuddy/
