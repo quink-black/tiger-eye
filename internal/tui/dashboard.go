@@ -121,7 +121,6 @@ var (
 		"done":               lipgloss.NewStyle().Foreground(lipgloss.Color("46")),             // green
 		"subagent_done":      lipgloss.NewStyle().Foreground(lipgloss.Color("40")),
 		"running":            lipgloss.NewStyle().Foreground(lipgloss.Color("33")), // blue
-		"ended":              lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 	}
 )
 

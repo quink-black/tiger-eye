@@ -231,6 +231,9 @@ func (s *Store) Snapshot(now time.Time) []AgentState {
 	out := make([]AgentState, 0, len(s.agents))
 	for _, a := range s.agents {
 		v := *a
+		if v.State == event.StateEnded {
+			continue
+		}
 		if event.DeriveStale(v.State, v.LastSeen, now) {
 			v.State = event.StateStale
 		}
