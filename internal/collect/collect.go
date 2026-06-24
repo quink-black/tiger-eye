@@ -19,9 +19,13 @@ import (
 	"github.com/quink/tiger-eye/internal/tui"
 )
 
-// retryDelay backs off a host whose transport or poll keeps failing, so a dead
-// DC tunnel does not spin.
-const retryDelay = 5 * time.Second
+// retryDelay is the initial backoff for a failing host. Each consecutive
+// failure doubles the delay up to maxRetryDelay, so a persistently-down ssh
+// target cannot drive thousands of reconnects per hour.
+const (
+	retryDelay    = 5 * time.Second
+	maxRetryDelay = 2 * time.Minute
+)
 
 // Run starts the collector. Flags:
 //
@@ -112,24 +116,38 @@ func RunWithHosts(hosts []config.Host, notifiers []config.NotifierConfig, noTUI 
 // superviseHost keeps a host's transport and poll loop alive, respawning on
 // failure until ctx is cancelled. Failures are recorded on the Store (shown in
 // the dashboard footer) rather than printed, which would corrupt the TUI's
-// alternate screen.
+// alternate screen. Backoff doubles on each consecutive failure so a dead ssh
+// target cannot fork-bomb the host; it resets once the host serves a healthy
+// poll.
 func superviseHost(ctx context.Context, h config.Host, store *Store, ready chan<- struct{}) {
+	delay := retryDelay
 	for ctx.Err() == nil {
-		if err := runHost(ctx, h, store, ready); err != nil && ctx.Err() == nil {
-			store.SetHostError(h.Name, err.Error())
-			store.MarkHostSessionsEnded(h.Name)
-			select {
-			case <-time.After(retryDelay):
-			case <-ctx.Done():
-				return
-			}
+		healthy, err := runHost(ctx, h, store, ready)
+		if healthy {
+			delay = retryDelay
+		}
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		store.SetHostError(h.Name, err.Error())
+		store.MarkHostSessionsEnded(h.Name)
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return
+		}
+		delay *= 2
+		if delay > maxRetryDelay {
+			delay = maxRetryDelay
 		}
 	}
 }
 
 // runHost establishes the transport for one host and runs its poll loop until
 // an error or ctx cancellation. For ssh hosts it owns the tunnel lifecycle.
-func runHost(ctx context.Context, h config.Host, store *Store, ready chan<- struct{}) error {
+// The healthy result is true if the loop reached at least one successful poll,
+// so the supervisor can reset its backoff.
+func runHost(ctx context.Context, h config.Host, store *Store, ready chan<- struct{}) (bool, error) {
 	var baseURL string
 	var tun *tunnel
 
@@ -141,10 +159,9 @@ func runHost(ctx context.Context, h config.Host, store *Store, ready chan<- stru
 	case config.ModeSSH:
 		t, url, err := startTunnel(ctx, h)
 		if err != nil {
-			return err
+			return false, err
 		}
 		tun, baseURL = t, url
-		defer tun.cmd.Process.Kill()
 	}
 
 	p := newPuller(h, baseURL)
@@ -153,26 +170,37 @@ func runHost(ctx context.Context, h config.Host, store *Store, ready chan<- stru
 	tunErr := make(chan error, 1)
 	if tun != nil {
 		go func() { tunErr <- tun.wait() }()
+		// close kills the ssh child and drains the wait goroutine so no
+		// zombie accumulates and no concurrent Wait exists.
+		defer tun.close(tunErr)
 	}
 
 	var since uint64
 	first := true
+	healthy := false
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case err := <-tunErr:
-			return fmt.Errorf("ssh tunnel exited: %v", err)
-		default:
+		// Block here until the tunnel is known-dead. Without this guard the
+		// default arm turns the select into a busy loop: when ssh has exited
+		// but tunErr has not yet fired, poll() hits connection-refused and
+		// returns instantly, churning one fork per iteration.
+		if tun != nil {
+			select {
+			case <-ctx.Done():
+				return healthy, nil
+			case err := <-tunErr:
+				return healthy, fmt.Errorf("ssh tunnel exited: %v", err)
+			default:
+			}
 		}
 
 		evs, last, err := p.poll(ctx, since)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return healthy, nil
 			}
-			return err
+			return healthy, err
 		}
+		healthy = true
 		store.SetHostOK(h.Name)
 		for _, e := range evs {
 			if e.Machine == "" {

@@ -50,7 +50,11 @@ func startTunnel(ctx context.Context, h config.Host) (*tunnel, string, error) {
 
 	// Wait briefly for the forward to become connectable before first poll.
 	if err := waitDial(baseURL, lp, 5*time.Second); err != nil {
+		// Kill alone leaves a zombie; Wait reaps the ssh process so the
+		// supervisor can respawn without leaking entries in the process
+		// table.
 		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return nil, "", fmt.Errorf("ssh -L to %s did not come up: %w", h.Name, err)
 	}
 	return t, baseURL, nil
@@ -59,6 +63,24 @@ func startTunnel(ctx context.Context, h config.Host) (*tunnel, string, error) {
 // wait blocks until the ssh process exits (tunnel died), so the supervisor can
 // respawn it.
 func (t *tunnel) wait() error { return t.cmd.Wait() }
+
+// close terminates the ssh process and ensures its wait goroutine has reaped
+// it. The waited channel is the buffered(1) channel that receives
+// tun.wait()'s result. After Kill, Wait returns promptly, so blocking here
+// does not hang.
+//
+// If the poll-loop select already consumed the value (tunnel exited on its
+// own), the goroutine has finished and the buffer is empty. In that case the
+// process is already reaped and Kill is a harmless no-op; we still must not
+// block on an empty, never-closed channel, so we use a non-blocking receive
+// as a fallback.
+func (t *tunnel) close(waited <-chan error) {
+	_ = t.cmd.Process.Kill()
+	select {
+	case <-waited:
+	default:
+	}
+}
 
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
