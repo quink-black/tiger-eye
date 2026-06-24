@@ -25,6 +25,11 @@ import (
 const (
 	retryDelay    = 5 * time.Second
 	maxRetryDelay = 2 * time.Minute
+
+	// liveDeadline bounds how long the collector waits for all hosts to
+	// connect before enabling notifications. Without it, a single
+	// unreachable host suppresses all speech alerts indefinitely.
+	liveDeadline = 10 * time.Second
 )
 
 // Run starts the collector. Flags:
@@ -89,11 +94,26 @@ func RunWithHosts(hosts []config.Host, notifiers []config.NotifierConfig, noTUI 
 		}(h)
 	}
 
+	// Go live once all hosts report ready, or when the deadline elapses —
+	// whichever comes first. Without the deadline, one unreachable host
+	// keeps catchingUp true forever and silently suppresses every alert.
+	var liveOnce sync.Once
+	goLive := func() { liveOnce.Do(store.SetLive) }
 	go func() {
-		for range ready {
-			pending--
-			if pending == 0 {
-				store.SetLive()
+		timer := time.NewTimer(liveDeadline)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ready:
+				pending--
+				if pending == 0 {
+					goLive()
+					return
+				}
+			case <-timer.C:
+				goLive()
+				return
+			case <-ctx.Done():
 				return
 			}
 		}
